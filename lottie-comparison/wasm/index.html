@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width height=device-height">
+  <meta name="description" content="rlottie viewer">
+  <meta name="keywords" content="lottie, rlottie, lottie viewer, rlottie player">
+  <meta name="author" content="Subhransu, Chae Lin Shin, Sun Hwan Park, Chaewon Shin, Seunghyun Shin, Seungjae Yoon">
+  <title>rlottie player</title>
+  <!-- style.css -->
+  <link rel="stylesheet" href="style.css">
+  <script>
+    let animations = ['animations/animation1.json', 'animations/animation2.json', 'animations/animation3.json'];
+    let currentAnimationIndex = 0;
+    let animation;
+    function changeAnimation() {
+      console.log('changeAnimation', currentAnimationIndex, animations[currentAnimationIndex])
+      const jsonAnimation = fetch(animations[currentAnimationIndex])
+        .then(response => response.text())
+        .then(data => {
+          loadAnimationFromJSON(data);
+          currentAnimationIndex = (currentAnimationIndex + 1) % animations.length;
+        });
+    }
+    function handleKeydown(event) {
+      console.log('event.keyCode', event.keyCode)
+      if (event.keyCode === 13) {
+        changeAnimation();
+      }
+    }
+    function initHbbTV() {
+      var appMan = document.getElementById('oipfAppMan')
+      if (appMan.getOwnerApplication) {
+        const app = appMan.getOwnerApplication(document);
+        try {
+          app.show();
+          app.activate();
+        } catch (e) {
+          console.error(e);
+        }
+        var keyset = app.privateData.keyset;
+        keyset.setValue(keyset.NAVIGATION);
+      }
+      document.addEventListener('keydown', handleKeydown);
+      //changeAnimation();
+    }
+  </script>
+  <object id="oipfAppMan" type="application/oipfApplicationManager"
+    style="width:0px; height:0px; position:absolute; visibility:hidden;"></object>
+</head>
+
+<body onload="initHbbTV()">
+  <div class="row no-gutters">
+    <!-- player -->
+    <div class="bg-white col-6">
+      <div id="player" class="player d-flex flex-column justify-content-between">
+        <!-- screen -->
+        <div class="screen my-auto mx-auto d-flex justify-content-center align-items-center">
+          <div class="my-auto mx-auto d-flex justify-content-center align-items-center row" id="content">
+            <div class="d-flex justify-content-center align-items-center">
+              <canvas class="common-canvas" id="myCanvas1"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- playbar -->
+        <div class="d-flex justify-content-around align-items-center playbar" id="playbar">
+          <span class="play-button" id="playButton" type="button" onclick="buttonClicked()">
+            <em class="fas fa-pause"></em>
+          </span>
+          <div class="d-flex flex-column align-items-between player-slider-container">
+            <input class="player-slider my-1" id="slider" type="range" min="0" max="100" value="0"
+              oninput="onSliderDrag(this.value)">
+            <div class="d-flex justify-content-between">
+              <span class="badge badge-light" id="currentFrame"></span>
+              <span class="badge badge-light" id="frameCount"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="main.js"></script>
+</body>
+
+</html>

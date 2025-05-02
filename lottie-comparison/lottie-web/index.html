@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <!--  Meta  -->
+    <meta charset="UTF-8" />
+    <title>Bodymovin Demo</title>
+
+    <!--  Styles  -->
+    <link rel="stylesheet" href="./styles/index.css">
+    <script>
+        let animations = ['animations/animation1.json', 'animations/animation2.json', 'animations/animation3.json'];
+        let currentAnimationIndex = 0;
+        let animation;
+        function changeAnimation() {
+            if (animation) {
+                animation.destroy();
+            }
+            animation = bodymovin.loadAnimation({
+                container: document.getElementById('bm'),
+                renderer: 'canvas',
+                loop: true,
+                autoplay: true,
+                path: animations[currentAnimationIndex]
+            })
+            currentAnimationIndex = (currentAnimationIndex + 1) % animations.length;
+        }
+        function handleKeydown(event) {
+            console.log('event.keyCode', event.keyCode)
+            if (event.keyCode === 13) {
+                changeAnimation();
+            }
+        }
+        function initHbbTV() {
+            var appMan = document.getElementById('oipfAppMan')
+            if (appMan.getOwnerApplication) {
+                const app = appMan.getOwnerApplication(document);
+                try {
+                    app.show();
+                    app.activate();
+                } catch (e) {
+                    console.error(e);
+                }
+                var keyset = app.privateData.keyset;
+                keyset.setValue(keyset.NAVIGATION);
+            }
+            document.addEventListener('keydown', handleKeydown);
+            changeAnimation();
+        }
+    </script>
+    <object id="oipfAppMan" type="application/oipfApplicationManager"
+        style="width:0px; height:0px; position:absolute; visibility:hidden;"></object>
+</head>
+
+<body onload="initHbbTV()">
+
+    <div id="bm"> </div>
+
+    <!-- Scripts -->
+    <script src="./scripts/bodymovin.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,14 @@
+version: '0.1'
+services: 
+  https-server:
+    image: httpd:latest
+    volumes:
+      - ./:/usr/local/apache2/htdocs/
+    ports:
+      - 80:80
+  wasm-compiler:
+    build: ../wasm-pack-docker
+    volumes:
+      - ./:/usr/src/myapp
+      - /usr/src/myapp/target
+    entrypoint: /sbin/watch.sh "wasm-pack build --target web"
