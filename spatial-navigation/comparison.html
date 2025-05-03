@@ -33,6 +33,11 @@
       overflow-y: auto;
     }
 
+    .container.options-container {
+      grid-template-columns: repeat(3, 100px);
+      grid-gap: 20px;
+    }
+
     .item {
       height: 20px;
       background-color: #f0f0f0;
@@ -47,6 +52,27 @@
     .item:focus {
       background-color: #ffe0e0;
       outline: 2px solid red;
+    }
+
+    /* Add these new styles for the options container items */
+    .options-container .item {
+      height: 30px;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+
+    .options-container .item:focus {
+      background-color: #ff9090;
+      outline: 3px solid red;
+      transform: scale(1.05);
+      box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+      font-weight: bold;
+    }
+
+    .options-container .item.selected {
+      background-color: #ffe0e0;
+      border: 2px solid red;
+      font-weight: bold;
     }
 
     #log-container {
@@ -79,19 +105,19 @@
   </style>
   <script>
     function clearList(technology) {
-      document.getElementsByClassName("list-container-" + technology)[0].innerHTML = '';
+      document.getElementsByClassName("list-container")[0].innerHTML = '';
       return new Promise((resolve) => {
-        //setTimeout(() => {
-        resolve();
-        //}, 500); // Allow the DOM to update before resolving
+        setTimeout(() => {
+          resolve();
+        }, 0);
       });
     }
-    function insertElements(elements, technology) {
+    function insertElements(elements) {
       return new Promise((resolve) => {
-        //setTimeout(() => {
-        document.getElementsByClassName("list-container-" + technology)[0].innerHTML = elements;
-        resolve();
-        //}, 500); // Allow the DOM to update before resolving
+        setTimeout(() => {
+          document.getElementsByClassName("list-container")[0].innerHTML = elements;
+          resolve();
+        }, 0);
       });
     }
     // Cache for string buffer and animation control
@@ -99,92 +125,61 @@
     let animationRunning = false;
     let animationFrameId = null;
 
-    function renderElements(totalElements, isWasm) {
-      // Cancel any existing animation
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
+    function renderElements(totalElements) {
 
-      // Set animation as running
-      animationRunning = true;
+      clearList().then(() => {
+        let items = '';
 
-      function animationLoop() {
-        clearList('js').then(() => {
-          let items = '';
-          if (!isWasm) {
-            window.startDebugTimer('renderElementsWithJS');
+        // Clear the buffer and update offset just like in Wasm version
+        jsColorOffset = (jsColorOffset + 1) % totalElements;
 
-            // Clear the buffer and update offset just like in Wasm version
-            jsColorOffset = (jsColorOffset + 1) % totalElements;
+        // Generate items with color shifting like in the Wasm version
+        for (let i = 1; i <= totalElements; i++) {
+          // Calculate background color with shifting effect
+          const position = (i + jsColorOffset) % totalElements;
+          const factor = position / totalElements;
+          const colorValue = Math.round(factor * 255);
+          const color = `rgb(${colorValue}, ${colorValue}, ${colorValue})`;
+          const textColor = factor < 0.5 ? 'white' : 'black';
 
-            // Generate items with color shifting like in the Wasm version
-            for (let i = 1; i <= totalElements; i++) {
-              // Calculate background color with shifting effect
-              const position = (i + jsColorOffset) % totalElements;
-              const factor = position / totalElements;
-              const colorValue = Math.round(factor * 255);
-              const color = `rgb(${colorValue}, ${colorValue}, ${colorValue})`;
-              const textColor = factor < 0.5 ? 'white' : 'black';
+          // Calculate border color with shifting blue tones
+          const blueFactor = ((position + totalElements / 2) % totalElements) / totalElements; // Offset from background
+          const blueValue = Math.round(50 + (blueFactor * 150)); // Range from 50-200 blue
+          const borderColor = `rgb(0, 100, ${blueValue})`;
 
-              // Calculate border color with shifting blue tones
-              const blueFactor = ((position + totalElements / 2) % totalElements) / totalElements; // Offset from background
-              const blueValue = Math.round(50 + (blueFactor * 150)); // Range from 50-200 blue
-              const borderColor = `rgb(0, 100, ${blueValue})`;
-
-              // Append to buffer with border style
-              items += `<div class="item" tabindex="0" 
+          // Append to buffer with border style
+          items += `<div class="item" tabindex="0" 
                             style="background-color: ${color}; 
                                    color: ${textColor}; 
                                    border: 2px solid ${borderColor}">${i}</div>`;
-            }
+        }
+        insertElements(items).then(() => {
 
-            window.endDebugTimer('renderElementsWithJS');
-          } else {
-            items = window.wasmNavigationHelper.renderNavigableElements(totalElements);
-          }
-
-          insertElements(items, 'js').then(() => {
-            if (animationRunning) {
-              //animationFrameId = requestAnimationFrame(animationLoop);
-            }
-          });
         });
-      }
+      });
 
-      // Start the animation loop
-      animationLoop();
-    }
-
-    function stopAnimation() {
-      animationRunning = false;
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-        //document.getElementsByClassName("render-action")[0].innerHTML = 'Start';
-      }
     }
 
     function handleKeydown(event) {
       if (event.keyCode === 13) { // Enter key
         const focusedElement = document.activeElement;
-        const NUMBER_OF_ELEMENTS = 200; // Number of elements to render
-
-        // Stop any running animation first
-        stopAnimation();
-
-        if (focusedElement && focusedElement.classList.contains('render-action-js')) {
-          renderElements(NUMBER_OF_ELEMENTS, false);
-          focusedElement.innerHTML = 'Running JS';
+         // Clear any previous selection
+         document.querySelectorAll('.options-container .item').forEach(item => {
+          item.classList.remove('selected');
+        });
+        
+        // Add selected class to the current element
+        if (focusedElement && focusedElement.classList.contains('item')) {
+          focusedElement.classList.add('selected');
         }
-        else if (focusedElement && focusedElement.classList.contains('render-action-wasm')) {
-          renderElements(NUMBER_OF_ELEMENTS, true);
-          focusedElement.innerHTML = 'Running WASM';
+        if (focusedElement && focusedElement.classList.contains('navigate-action-js')) {
+          setImplementationPreference('selectBestCandidate', 'js');
         }
-        else if (focusedElement && focusedElement.classList.contains('render-action-stop')) {
-          stopAnimation();
-          document.getElementsByClassName("render-action-js")[0].innerHTML = 'Start JS';
-          document.getElementsByClassName("render-action-wasm")[0].innerHTML = 'Start WASM';
+        else if (focusedElement && focusedElement.classList.contains('navigate-action-wasm')) {
+          setImplementationPreference('selectBestCandidate', 'wasm');
+        }
+        else if (focusedElement && focusedElement.classList.contains('navigate-action-comparison')) {
+          setImplementationPreference('selectBestCandidate', 'compare');
         }
       }
     }
@@ -204,7 +199,7 @@
       }
       document.addEventListener('keydown', handleKeydown);
       document.getElementsByClassName("item").item(0).focus(); // Focus the first item
-      renderElements(500, false);
+      renderElements(500);
     }
   </script>
   <object id="oipfAppMan" type="application/oipfApplicationManager"
@@ -214,13 +209,13 @@
 <body onload="initHbbTV();">
   <h1>Spatial Navigation WebAssembly Demo</h1>
   <div class="options-container container">
-    <div class="item render-action-js" tabindex="0">Start JS</div>
-    <div class="item render-action-wasm" tabindex="0">Start WASM</div>
-    <div class="item render-action-stop" tabindex="0">Stop</div>
+    <div class="item selected navigate-action-comparison" tabindex="0">Comparison</div>
+    <div class="item navigate-action-js" tabindex="0">Navigate with JS</div>
+    <div class="item navigate-action-wasm" tabindex="0">Navigate with Wasm</div>
   </div>
   <div class="demo-container">
     <div class="demo-column">
-      <div class="list-container-js container"></div>
+      <div class="list-container container"></div>
     </div>
   </div>
   <div id="log-container">
@@ -289,16 +284,23 @@
       }
       window.debugTimersHistory[id].push(duration);
 
-      // Mantener solo los últimos 20 valores
+      // Mantener solo los últimos 100 valores
       if (window.debugTimersHistory[id].length > 100) {
         window.debugTimersHistory[id].shift();
       }
 
-      // Calcular y mostrar la mediana
-      // Actualizar el promedio en el elemento "average"
-      log.innerHTML = 'JS: ' + calculateMedian(window.debugTimersHistory['renderElementsWithJS']) + '<br>' +
-        'Wasm: ' + calculateMedian(window.debugTimersHistory['renderElementsWithWasm']);
     }
+
+    // Set up an interval to update the metrics every 2 seconds
+    setInterval(() => {
+      if (window.debugTimersHistory['selectBestCandidate js'] || window.debugTimersHistory['selectBestCandidate wasm']) {
+        const jsDuration = calculateMedian(window.debugTimersHistory['selectBestCandidate js'] || [])
+        const wasmDuration = calculateMedian(window.debugTimersHistory['selectBestCandidate wasm'] || [])
+        log.innerHTML = 'JS: ' + jsDuration.toFixed(2) + ' ms<br>' +
+          'Wasm: ' + wasmDuration.toFixed(2) + ' ms<br>' +
+          'Ratio: ' + (jsDuration / wasmDuration).toFixed(2) + 'x';
+      }
+    }, 2000);
 
     // Función para calcular la mediana de un array
     function calculateMedian(values) {

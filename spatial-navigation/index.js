@@ -150,6 +150,42 @@ const runWasm = async () => {
           y: result.exit_point.y
         }
       };
+    },
+    /**
+     * Get intersection rect between two rectangles
+     */
+    getIntersectionRect(rect1, rect2) {
+      const wasmRect1 = createWasmRect(rect1);
+      const wasmRect2 = createWasmRect(rect2);
+      return wasm.get_intersection_rect(wasmRect1, wasmRect2);
+    },
+    /**
+     * Get the closest element among candidates
+     */
+    getClosestElement(currentElement, candidates, dir, distanceFunctionName) {
+      const wasmCurrentElement = createWasmRect(currentElement);
+      const wasmCandidates = candidates.map(candidate => createWasmRect(candidate));
+      const result = wasm.get_closest_element(wasmCurrentElement, wasmCandidates, Direction[dir], distanceFunctionName);
+      
+      // Returns an optional index
+      return result !== null ? result : null;
+    },
+    /**
+     * Select the best candidate among candidates by finding the closest candidate from the edge
+     * @param {DOMRect} currentElmRect - The currently focused element's rect
+     * @param {Array<DOMRect>} candidateRects - The candidate rectangles
+     * @param {string} dir - The direction ('left', 'right', 'up', 'down')
+     * @returns {number|null} - The index of the best candidate or null
+     */
+    selectBestCandidateFromEdge(currentElmRect, candidateRects, dir) {
+      const wasmCurrentElement = createWasmRect(currentElmRect);
+      const wasmCandidates = candidateRects.map(candidate => createWasmRect(candidate));
+      return wasm.select_best_candidate_from_edge(wasmCurrentElement, wasmCandidates, Direction[dir]);
+    },
+    selectBestCandidate(currentElmRect, candidateRects, dir, spatialNavigationFunction) {
+      const wasmCurrentElement = createWasmRect(currentElmRect);
+      const wasmCandidates = candidateRects.map(candidate => createWasmRect(candidate));
+      return wasm.select_best_candidate(wasmCurrentElement, wasmCandidates, Direction[dir], spatialNavigationFunction);
     }
   };
 };

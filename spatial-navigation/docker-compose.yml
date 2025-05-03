@@ -11,4 +11,5 @@ services:
     volumes:
       - ./:/usr/src/myapp
       - /usr/src/myapp/target
-    entrypoint: /sbin/watch.sh "wasm-pack build --target web"
+    # entrypoint: /sbin/watch.sh "wasm-pack build --target web"
+    entrypoint: wasm-pack build --target web

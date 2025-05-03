@@ -23,6 +23,92 @@
   let savedSearchOrigin = { element: null, rect: null };  // Saves previous search origin
   let searchOriginRect = null;  // Rect of current search origin
 
+  // Add this near the top of your file after the existing variable declarations
+  const fnImplementationConfig = {
+    isInside: 'js',           // 'js', 'wasm', or 'compare'
+    isOutside: 'js',
+    isRightSide: 'js',
+    isBelow: 'js',
+    isAligned: 'js',
+    getEntryAndExitPoints: 'js',
+    getEuclideanDistance: 'js',
+    getAbsoluteDistance: 'js',
+    getDistanceFromPoint: 'js',
+    getInnerDistance: 'js',
+    getDistance: 'js',
+    getClosestElement: 'js',
+    selectBestCandidateFromEdge: 'js',
+    selectBestCandidate: 'compare',
+  };
+
+  /**
+   * Executes a function according to the specified implementation preference
+   * @function executeFunction
+   * @param {string} fnName - Name of the function being executed
+   * @param {Function} jsImpl - JavaScript implementation
+   * @param {Function} wasmImpl - WebAssembly implementation
+   * @param {Array} args - Arguments to pass to the implementation
+   * @returns {*} - Result from the selected implementation
+   */
+  function executeFunction(fnName, jsImpl, wasmImpl, args) {
+    const preference = fnImplementationConfig[fnName] || 'compare';
+
+    switch (preference) {
+      case 'js':
+        return jsImpl(...args);
+      case 'wasm':
+        return wasmImpl(...args);
+      case 'compare':
+      default:
+        return measurePerformance(fnName, jsImpl, wasmImpl, args);
+    }
+  }
+
+  /**
+   * Change fnImplementationConfig to 'wasm' or 'js' for the specified function
+   * @function setImplementationPreference
+   * @param {string} fnName - Name of the function to change the implementation preference for
+   * @param {string} preference - 'wasm', 'js' or 'compare'
+   * @returns {void}
+   * */
+  function setImplementationPreference(fnName, preference) {
+    if (fnImplementationConfig[fnName]) {
+      fnImplementationConfig[fnName] = preference;
+    } else {
+      console.warn(`Function ${fnName} does not exist in fnImplementationConfig.`);
+    }
+  }
+
+  /**
+   * Measures performance of JS vs WASM implementation and compares results
+   * @function measurePerformance
+   * @param {string} fnName - Name of the function being measured
+   * @param {Function} jsImpl - JavaScript implementation
+   * @param {Function} wasmImpl - WebAssembly implementation
+   * @param {Array} args - Arguments to pass to both implementations
+   * @param {Function} compareResults - Function to compare results (optional)
+   * @returns {*} - Result from the JavaScript implementation
+   */
+  function measurePerformance(fnName, jsImpl, wasmImpl, args, compareResults = (a, b) => JSON.stringify(a) === JSON.stringify(b)) {
+    // Measure JS performance
+    const jsStartTime = performance.now();
+    window.startDebugTimer(fnName + ' js');
+    const jsResult = jsImpl(...args);
+    window.endDebugTimer(fnName + ' js');
+    const jsEndTime = performance.now();
+    const jsDuration = jsEndTime - jsStartTime;
+
+    // Measure WASM performance
+    const wasmStartTime = performance.now();
+    window.startDebugTimer(fnName + ' wasm');
+    const wasmResult = wasmImpl(...args);
+    window.endDebugTimer(fnName + ' wasm');
+    const wasmEndTime = performance.now();
+    const wasmDuration = wasmEndTime - wasmStartTime;
+
+    return jsResult;
+  }
+  
   /**
    * Initiate the spatial navigation features of the polyfill.
    * @function initiateSpatialNavigation
@@ -363,17 +449,17 @@
     // Set default parameter value
     if (!args)
       args = {};
-
     const defaultContainer = targetElement.getSpatialNavigationContainer();
     let defaultCandidates = getSpatialNavigationCandidates(defaultContainer);
     const container = args.container || defaultContainer;
+    console.time('spatialNavigationSearch');
     if (args.container && (defaultContainer.contains(args.container))) {
       defaultCandidates = defaultCandidates.concat(getSpatialNavigationCandidates(container));
     }
+    console.timeEnd('spatialNavigationSearch');
     const candidates = (args.candidates && args.candidates.length > 0) ?
       args.candidates.filter((candidate) => container.contains(candidate)) :
       defaultCandidates.filter((candidate) => container.contains(candidate) && (container !== candidate));
-
     // Find the best candidate
     // 5
     // If startingPoint is either a scroll container or the document,
@@ -408,9 +494,9 @@
       if ((internalCandidates && internalCandidates.length > 0) && !(targetElement.nodeName === 'INPUT')) {
         bestTarget = selectBestCandidateFromEdge(targetElement, internalCandidates, dir);
       }
-
+      
       bestTarget = bestTarget || selectBestCandidate(targetElement, externalCandidates, dir);
-
+      
       if (bestTarget && isDelegableContainer(bestTarget)) {
         // if best target is delegable container, then find descendants candidate inside delegable container.
         const innerTarget = getSpatialNavigationCandidates(bestTarget, { mode: 'all' });
@@ -490,25 +576,39 @@
    * @returns {Node} The best candidate which will gain the focus
    */
   function selectBestCandidate(currentElm, candidates, dir) {
+    // Early exit for empty candidates
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    const currentRect = searchOriginRect || getBoundingClientRect(currentElm);
+    const candidatesRects = candidates.map(c => getBoundingClientRect(c));
     const container = currentElm.getSpatialNavigationContainer();
     const spatialNavigationFunction = getComputedStyle(container).getPropertyValue('--spatial-navigation-function');
-    const currentTargetRect = searchOriginRect || getBoundingClientRect(currentElm);
-    let distanceFunction;
-    let alignedCandidates;
 
-    switch (spatialNavigationFunction) {
-      case 'grid':
-        alignedCandidates = candidates.filter(elm => isAligned(currentTargetRect, getBoundingClientRect(elm), dir));
-        if (alignedCandidates.length > 0) {
-          candidates = alignedCandidates;
-        }
-        distanceFunction = getAbsoluteDistance;
-        break;
-      default:
-        distanceFunction = getDistance;
-        break;
-    }
-    return getClosestElement(currentElm, candidates, dir, distanceFunction);
+    return executeFunction(
+      'selectBestCandidate',
+      () => selectBestCandidateJS(currentElm, candidates, dir),
+      () => {
+        const bestCandidateIndex = window.wasmNavigationHelper.selectBestCandidate(
+          currentRect,
+          candidatesRects,
+          dir,
+          spatialNavigationFunction
+        );
+        return bestCandidateIndex !== null ? candidates[bestCandidateIndex] : null;
+      },
+      [currentElm, candidates, dir],
+      // Custom comparator to check if results are equal
+      (wasmResult, jsResult) => wasmResult === jsResult
+    );
+  }
+
+  function selectBestCandidateFromEdgeJS(currentElm, candidates, dir) {
+    if (startingPoint)
+      return getClosestElement(currentElm, candidates, dir, getDistanceFromPoint);
+    else
+      return getClosestElement(currentElm, candidates, dir, getInnerDistance);
   }
 
   /**
@@ -521,22 +621,41 @@
    * @returns {Node} The best candidate which will gain the focus
    */
   function selectBestCandidateFromEdge(currentElm, candidates, dir) {
-    if (startingPoint)
-      return getClosestElement(currentElm, candidates, dir, getDistanceFromPoint);
-    else
-      return getClosestElement(currentElm, candidates, dir, getInnerDistance);
+    // If there are no candidates, return null
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    const currentRect = searchOriginRect || getBoundingClientRect(currentElm);
+    const candidatesRects = candidates.map(c => getBoundingClientRect(c));
+
+    return executeFunction(
+      'selectBestCandidateFromEdge',
+      () => selectBestCandidateFromEdgeJS(currentElm, candidates, dir),
+      () => {
+        const closestIndex = window.wasmNavigationHelper.selectBestCandidateFromEdge(
+          currentRect,
+          candidatesRects,
+          dir
+        );
+        return closestIndex !== null ? candidates[closestIndex] : null;
+      },
+      [currentElm, candidates, dir],
+      // Custom comparator to check if results are equal
+      (wasmResult, jsResult) => wasmResult === jsResult
+    );
   }
 
   /**
-   * Select the closest candidate from the currently focused element (search origin) among candidates by using the distance function.
-   * @function getClosestElement
+   * Create a specific JS implementation function to isolate the JS version
+   * @function getClosestElementJS
    * @param currentElm {Node} - The currently focused element which is defined as 'search origin' in the spec
    * @param candidates {sequence<Node>} - The candidates for spatial navigation
    * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
    * @param distanceFunction {function} - The distance function which measures the distance from the search origin to each candidate
    * @returns {Node} The candidate which is the closest one from the search origin
    */
-  function getClosestElement(currentElm, candidates, dir, distanceFunction) {
+  function getClosestElementJS(currentElm, candidates, dir, distanceFunction) {
     let eventTargetRect = null;
     if ((window.location !== window.parent.location) && (currentElm.nodeName === 'BODY' || currentElm.nodeName === 'HTML')) {
       // If the eventTarget is iframe, then get rect of it based on its containing document
@@ -569,6 +688,51 @@
 
     return (minDistanceElements.length > 1 && distanceFunction === getAbsoluteDistance) ?
       getClosestElement(currentElm, minDistanceElements, dir, getEuclideanDistance) : minDistanceElements[0];
+  }
+
+  /**
+   * Select the closest candidate from the currently focused element (search origin) among candidates by using the distance function.
+   * @function getClosestElement
+   * @param currentElm {Node} - The currently focused element which is defined as 'search origin' in the spec
+   * @param candidates {sequence<Node>} - The candidates for spatial navigation
+   * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
+   * @param distanceFunction {function} - The distance function which measures the distance from the search origin to each candidate
+   * @returns {Node} The candidate which is the closest one from the search origin
+   */
+  function getClosestElement(currentElm, candidates, dir, distanceFunction) {
+    // Early exit for empty candidates
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    // Map the distanceFunction to its name for WASM
+    let distanceFunctionName;
+    if (distanceFunction === getAbsoluteDistance) distanceFunctionName = "getAbsoluteDistance";
+    else if (distanceFunction === getEuclideanDistance) distanceFunctionName = "getEuclideanDistance";
+    else if (distanceFunction === getDistance) distanceFunctionName = "getDistance";
+    else if (distanceFunction === getDistanceFromPoint) distanceFunctionName = "getDistanceFromPoint";
+    else if (distanceFunction === getInnerDistance) distanceFunctionName = "getInnerDistance";
+    else distanceFunctionName = "getDistance"; // Default
+
+    const currentRect = searchOriginRect || getBoundingClientRect(currentElm);
+    const candidatesRects = candidates.map(c => getBoundingClientRect(c));
+
+    return executeFunction(
+      'getClosestElement',
+      () => getClosestElementJS(currentElm, candidates, dir, distanceFunction),
+      () => {
+        const closestIndex = window.wasmNavigationHelper.getClosestElement(
+          currentRect,
+          candidatesRects,
+          dir,
+          distanceFunctionName
+        );
+        return closestIndex !== null ? candidates[closestIndex] : null;
+      },
+      [currentElm, candidates, dir, distanceFunction],
+      // Comparador personalizado para verificar si los resultados son iguales
+      (wasmResult, jsResult) => wasmResult === jsResult
+    );
   }
 
   /**
@@ -1141,7 +1305,7 @@
 
   /**
    * Decide whether a child element is entirely or partially Included within container visually.
-   * @function isInside
+   * @function isInsideJS
    * @param containerRect {DOMRect}
    * @param childRect {DOMRect}
    * @returns {boolean}
@@ -1155,22 +1319,20 @@
     return (rightEdgeCheck || leftEdgeCheck) && (topEdgeCheck || bottomEdgeCheck);
   }
 
-  /* Método que compara las implementaciones de Rust y JS */
+  /* Method that compares Rust and JS implementations */
   function isInside(containerRect, childRect) {
-    const wasmResult = wasmNavigationHelper.isInside(containerRect, childRect);
-    const jsResult = isInsideJS(containerRect, childRect);
-
-    if (wasmResult !== jsResult) {
-      console.info('isInside mismatch:', wasmResult, jsResult, containerRect, childRect);
-    }
-
-    return jsResult;
+    return executeFunction(
+      'isInside',
+      () => isInsideJS(containerRect, childRect),
+      () => wasmNavigationHelper.isInside(containerRect, childRect),
+      [containerRect, childRect]
+    );
   }
 
   /**
    * Decide whether this element is entirely or partially visible within the viewport.
    * Note: rect1 is outside of rect2 for the dir
-   * @function isOutside
+   * @function isOutsideJS
    * @param rect1 {DOMRect}
    * @param rect2 {DOMRect}
    * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
@@ -1193,12 +1355,12 @@
 
   /* Compare Rust and JS implementations of isOutside */
   function isOutside(rect1, rect2, dir) {
-    const wasmResult = wasmNavigationHelper.isOutside(rect1, rect2, dir);
-    const jsResult = isOutsideJS(rect1, rect2, dir);
-    if (wasmResult !== jsResult) {
-      console.info('isOutside mismatch:', wasmResult, jsResult, rect1, rect2, dir);
-    }
-    return jsResult;
+    return executeFunction(
+      'isOutside',
+      () => isOutsideJS(rect1, rect2, dir),
+      () => wasmNavigationHelper.isOutside(rect1, rect2, dir),
+      [rect1, rect2, dir]
+    );
   }
 
   /* rect1 is right of rect2 */
@@ -1212,22 +1374,22 @@
 
   /* Compare Rust and JS implementations of isRightSide */
   function isRightSide(rect1, rect2) {
-    const wasmResult = wasmNavigationHelper.isRightSide(rect1, rect2);
-    const jsResult = isRightSideJS(rect1, rect2);
-    if (wasmResult !== jsResult) {
-      console.info('isRightSide mismatch:', wasmResult, jsResult, rect1, rect2);
-    }
-    return jsResult;
+    return executeFunction(
+      'isRightSide',
+      () => isRightSideJS(rect1, rect2),
+      () => wasmNavigationHelper.isRightSide(rect1, rect2),
+      [rect1, rect2]
+    );
   }
 
   /* rect1 is below of rect2 */
   function isBelow(rect1, rect2) {
-    const wasmResult = wasmNavigationHelper.isBelow(rect1, rect2);
-    const jsResult = isBelowJS(rect1, rect2);
-    if (wasmResult !== jsResult) {
-      console.info('isBelow????', wasmResult, jsResult, rect1, rect2)
-    }
-    return jsResult;
+    return executeFunction(
+      'isBelow',
+      () => isBelowJS(rect1, rect2),
+      () => wasmNavigationHelper.isBelow(rect1, rect2),
+      [rect1, rect2]
+    );
   }
 
   /* rect1 is below of rect2 */
@@ -1249,16 +1411,37 @@
     }
   }
 
-  /* Método que compara las implementaciones de Rust y JS */
+  /* Method that compares Rust and JS implementations */
   function isAligned(rect1, rect2, dir) {
-    const wasmResult = wasmNavigationHelper.isAligned(rect1, rect2, dir);
-    const jsResult = isAlignedJS(rect1, rect2, dir);
+    return executeFunction(
+      'isAligned',
+      () => isAlignedJS(rect1, rect2, dir),
+      () => wasmNavigationHelper.isAligned(rect1, rect2, dir),
+      [rect1, rect2, dir]
+    );
+  }
 
-    if (wasmResult !== jsResult) {
-      console.info('isAligned mismatch:', wasmResult, jsResult, rect1, rect2, dir);
-    }
+  /**
+   * Get distance between the search origin and a candidate element along the direction when candidate element is inside the search origin.
+   * @see {@link https://drafts.csswg.org/css-nav-1/#find-the-shortest-distance}
+   * @function getDistanceFromPointJS
+   * @param point {Point} - The search origin
+   * @param element {DOMRect} - A candidate element
+   * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
+   * @returns {Number} The euclidian distance between the spatial navigation container and an element inside it
+   */
+  function getDistanceFromPointJS(point, element, dir) {
+    point = startingPoint;
+    // Get exit point, entry point -> {x: '', y: ''};
+    const points = getEntryAndExitPoints(dir, point, element);
 
-    return jsResult;
+    // Find the points P1 inside the border box of starting point and P2 inside the border box of candidate
+    // that minimize the distance between these two points
+    const P1 = Math.abs(points.entryPoint.x - points.exitPoint.x);
+    const P2 = Math.abs(points.entryPoint.y - points.exitPoint.y);
+
+    // The result is euclidian distance between P1 and P2.
+    return Math.sqrt(Math.pow(P1, 2) + Math.pow(P2, 2));
   }
 
   /**
@@ -1271,17 +1454,12 @@
    * @returns {Number} The euclidian distance between the spatial navigation container and an element inside it
    */
   function getDistanceFromPoint(point, element, dir) {
-    point = startingPoint;
-    // Get exit point, entry point -> {x: '', y: ''};
-    const points = getEntryAndExitPoints(dir, point, element);
-
-    // Find the points P1 inside the border box of starting point and P2 inside the border box of candidate
-    // that minimize the distance between these two points
-    const P1 = Math.abs(points.entryPoint.x - points.exitPoint.x);
-    const P2 = Math.abs(points.entryPoint.y - points.exitPoint.y);
-
-    // The result is euclidian distance between P1 and P2.
-    return Math.sqrt(Math.pow(P1, 2) + Math.pow(P2, 2));
+    return executeFunction(
+      'getDistanceFromPoint',
+      () => getDistanceFromPointJS(point, element, dir),
+      () => wasmNavigationHelper.getDistanceFromPoint(point, element, dir),
+      [point, element, dir]
+    );
   }
 
   /**
@@ -1300,6 +1478,15 @@
     return Math.abs(rect1[baseEdge] - rect2[baseEdge]);
   }
 
+  function getDistance(searchOrigin, candidateRect, dir) {
+    return executeFunction(
+      'getDistance',
+      () => getDistanceJS(searchOrigin, candidateRect, dir),
+      () => wasmNavigationHelper.getDistance(searchOrigin, candidateRect, dir),
+      [searchOrigin, candidateRect, dir]
+    );
+  }
+
   /**
    * Get the distance between the search origin and a candidate element considering the direction.
    * @see {@link https://drafts.csswg.org/css-nav-1/#calculating-the-distance}
@@ -1309,7 +1496,7 @@
    * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
    * @returns {Number} The distance scoring between two elements
    */
-  function getDistance(searchOrigin, candidateRect, dir) {
+  function getDistanceJS(searchOrigin, candidateRect, dir) {
     const kOrthogonalWeightForLeftRight = 30;
     const kOrthogonalWeightForUpDown = 2;
 
@@ -1376,13 +1563,13 @@
 
   /**
    * Get the euclidean distance between the search origin and a candidate element considering the direction.
-   * @function getEuclideanDistance
+   * @function getEuclideanDistanceJS
    * @param rect1 {DOMRect} - The search origin
    * @param rect2 {DOMRect} - A candidate element
    * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
    * @returns {Number} The distance scoring between two elements
    */
-  function getEuclideanDistance(rect1, rect2, dir) {
+  function getEuclideanDistanceJS(rect1, rect2, dir) {
     // Get exit point, entry point
     const points = getEntryAndExitPoints(dir, rect1, rect2);
 
@@ -1396,14 +1583,26 @@
   }
 
   /**
+   * Compare Rust and JS implementations of getEuclideanDistance
+   */
+  function getEuclideanDistance(rect1, rect2, dir) {
+    return executeFunction(
+      'getEuclideanDistance',
+      () => getEuclideanDistanceJS(rect1, rect2, dir),
+      () => wasmNavigationHelper.getEuclideanDistance(rect1, rect2, dir),
+      [rect1, rect2, dir]
+    );
+  }
+
+  /**
    * Get the absolute distance between the search origin and a candidate element considering the direction.
-   * @function getAbsoluteDistance
+   * @function getAbsoluteDistanceJS
    * @param rect1 {DOMRect} - The search origin
    * @param rect2 {DOMRect} - A candidate element
    * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
    * @returns {Number} The distance scoring between two elements
    */
-  function getAbsoluteDistance(rect1, rect2, dir) {
+  function getAbsoluteDistanceJS(rect1, rect2, dir) {
     // Get exit point, entry point
     const points = getEntryAndExitPoints(dir, rect1, rect2);
 
@@ -1412,15 +1611,26 @@
       Math.abs(points.entryPoint.x - points.exitPoint.x) : Math.abs(points.entryPoint.y - points.exitPoint.y);
   }
 
-  function getEntryAndExitPoints(dir = 'down', searchOrigin, candidateRect) {
-    const wasmResult = wasmNavigationHelper.getEntryAndExitPoints(dir, searchOrigin, candidateRect, startingPoint);
-    const jsResult = getEntryAndExitPointsJS(dir, searchOrigin, candidateRect);
-    if (JSON.stringify(wasmResult) !== JSON.stringify(jsResult)) {
-      console.info('getEntryAndExitPoints mismatch:', wasmResult, jsResult, dir, searchOrigin, candidateRect);
-    }
-    return jsResult;
+  /**
+   * Compare Rust and JS implementations of getAbsoluteDistance
+   */
+  function getAbsoluteDistance(rect1, rect2, dir) {
+    return executeFunction(
+      'getAbsoluteDistance',
+      () => getAbsoluteDistanceJS(rect1, rect2, dir),
+      () => wasmNavigationHelper.getAbsoluteDistance(rect1, rect2, dir),
+      [rect1, rect2, dir]
+    );
   }
 
+  function getEntryAndExitPoints(dir = 'down', searchOrigin, candidateRect) {
+    return executeFunction(
+      'getEntryAndExitPoints',
+      () => getEntryAndExitPointsJS(dir, searchOrigin, candidateRect),
+      () => wasmNavigationHelper.getEntryAndExitPoints(dir, searchOrigin, candidateRect, startingPoint),
+      [dir, searchOrigin, candidateRect]
+    );
+  }
 
   /**
    * Get entry point and exit point of two elements considering the direction.
@@ -1808,10 +2018,46 @@
     };
   }
 
+  /**
+   * Isolated JavaScript implementation of selectBestCandidate
+   * @function selectBestCandidateJS
+   * @param {Node} currentElm - The currently focused element
+   * @param {sequence<Node>} candidates - The candidates for spatial navigation
+   * @param {SpatialNavigationDirection} dir - The directional information
+   * @returns {Node} The best candidate which will gain the focus
+   */
+  function selectBestCandidateJS(currentElm, candidates, dir) {
+    if (!candidates || candidates.length === 0) {
+      return null;
+    }
+
+    const container = currentElm.getSpatialNavigationContainer();
+    const spatialNavigationFunction = getComputedStyle(container).getPropertyValue('--spatial-navigation-function');
+    const currentTargetRect = searchOriginRect || getBoundingClientRect(currentElm);
+    let distanceFunction;
+    let alignedCandidates;
+
+    switch (spatialNavigationFunction) {
+      case 'grid':
+        alignedCandidates = candidates.filter(elm => isAligned(currentTargetRect, getBoundingClientRect(elm), dir));
+        if (alignedCandidates.length > 0) {
+          candidates = alignedCandidates;
+        }
+        distanceFunction = getAbsoluteDistance;
+        break;
+      default:
+        distanceFunction = getDistance;
+        break;
+    }
+    return getClosestElement(currentElm, candidates, dir, distanceFunction);
+  }
+
   initiateSpatialNavigation();
   enableExperimentalAPIs(false);
 
   window.addEventListener('load', () => {
     spatialNavigationHandler();
+    // Report metrics after 5 seconds to allow for some navigation
+    window.setImplementationPreference = setImplementationPreference;
   });
 })();

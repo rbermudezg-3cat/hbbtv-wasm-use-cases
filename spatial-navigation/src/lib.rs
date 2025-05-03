@@ -1,5 +1,4 @@
 use wasm_bindgen::prelude::*;
-use js_sys::Math;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
@@ -106,6 +105,12 @@ impl Rect {
             width: rect.width(),
             height: rect.height(),
         }
+    }
+
+    // Add this method to Rect impl
+    pub fn set_starting_point(&self, x: f64, y: f64) {
+        let mut starting_point = STARTING_POINT.lock().unwrap();
+        *starting_point = Some(Point { x, y });
     }
 }
 
@@ -296,6 +301,26 @@ pub fn get_entry_and_exit_points(
 }
 
 #[wasm_bindgen]
+pub fn get_entry_and_exit_points_from_point(
+    dir: Direction,
+    point: Point,
+    candidate_rect: &Rect
+) -> EntryExitPoints {
+    // Convert the point to a Rect where all sides are at the point position
+    let search_origin = Rect {
+        top: point.y,
+        bottom: point.y,
+        left: point.x,
+        right: point.x,
+        width: 0.0,
+        height: 0.0,
+    };
+    
+    // Reuse the existing implementation for Rect
+    get_entry_and_exit_points(dir, search_origin, candidate_rect)
+}
+
+#[wasm_bindgen]
 pub fn set_starting_point(x: f64, y: f64) {
     let mut starting_point = STARTING_POINT.lock().unwrap();
     *starting_point = Some(Point { x, y });
@@ -311,6 +336,284 @@ pub fn get_starting_point() -> Option<Point> {
 pub fn clear_starting_point() {
     let mut starting_point = STARTING_POINT.lock().unwrap();
     *starting_point = None;
+}
+
+#[wasm_bindgen]
+pub fn get_absolute_distance(rect1: &Rect, rect2: &Rect, dir: Direction) -> f64 {
+    // Obtener los puntos de entrada y salida
+    let points = get_entry_and_exit_points(dir, *rect1, rect2);
+    
+    // Devolver la distancia absoluta en la dirección dir entre los puntos
+    match dir {
+        Direction::Left | Direction::Right => (points.entry_point.x - points.exit_point.x).abs(),
+        Direction::Up | Direction::Down => (points.entry_point.y - points.exit_point.y).abs(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_euclidean_distance(rect1: &Rect, rect2: &Rect, dir: Direction) -> f64 {
+    // Obtener los puntos de entrada y salida
+    let points = get_entry_and_exit_points(dir, *rect1, rect2);
+    
+    // Calcular la distancia entre los puntos
+    let p1 = (points.entry_point.x - points.exit_point.x).abs();
+    let p2 = (points.entry_point.y - points.exit_point.y).abs();
+    
+    // Devolver la distancia euclidiana entre P1 y P2
+    (p1 * p1 + p2 * p2).sqrt()
+}
+
+#[wasm_bindgen]
+pub fn get_distance_from_point(point: &Point, element: &Rect, dir: Direction) -> f64 {
+    // Get exit point, entry point
+    let points = get_entry_and_exit_points_from_point(dir, *point, element);
+    
+    // Find the points P1 inside the border box of starting point and P2 inside the border box of candidate
+    // that minimize the distance between these two points
+    let p1 = (points.entry_point.x - points.exit_point.x).abs();
+    let p2 = (points.entry_point.y - points.exit_point.y).abs();
+    
+    // Return the euclidean distance between P1 and P2
+    (p1 * p1 + p2 * p2).sqrt()
+}
+
+#[wasm_bindgen]
+pub fn get_distance(rect1: &Rect, rect2: &Rect, dir: Direction) -> f64 {
+    const K_ORTHOGONAL_WEIGHT_FOR_LEFT_RIGHT: f64 = 30.0;
+    const K_ORTHOGONAL_WEIGHT_FOR_UP_DOWN: f64 = 2.0;
+    const ALIGN_WEIGHT: f64 = 5.0;
+
+    let mut orthogonal_bias = 0.0;
+    let mut align_bias = 0.0;
+    
+    // Get exit point, entry point
+    let points = get_entry_and_exit_points(dir, *rect1, rect2);
+    
+    // Find the points P1 inside the border box of starting point and P2 inside the border box of candidate
+    // that minimize the distance between these two points
+    let p1 = (points.entry_point.x - points.exit_point.x).abs();
+    let p2 = (points.entry_point.y - points.exit_point.y).abs();
+    
+    // A: The euclidean distance between P1 and P2
+    let a = (p1.powi(2) + p2.powi(2)).sqrt();
+    
+    // D: The intersection area between the border boxes
+    let intersection_rect = get_intersection_rect(rect1, rect2);
+    let d = intersection_rect.area;
+    
+    // Calculate B and C based on direction
+    let (b, c) = match dir {
+        Direction::Left | Direction::Right => {
+            // If two elements are aligned, add align bias
+            // else, add orthogonal bias
+            if is_aligned(rect1, rect2, dir) {
+                align_bias = (intersection_rect.height / rect1.height).min(1.0);
+            } else {
+                orthogonal_bias = rect1.height / 2.0;
+            }
+            
+            let b_value = (p2 + orthogonal_bias) * K_ORTHOGONAL_WEIGHT_FOR_LEFT_RIGHT;
+            let c_value = ALIGN_WEIGHT * align_bias;
+            (b_value, c_value)
+        },
+        Direction::Up | Direction::Down => {
+            // If two elements are aligned, add align bias
+            // else, add orthogonal bias
+            if is_aligned(rect1, rect2, dir) {
+                align_bias = (intersection_rect.width / rect1.width).min(1.0);
+            } else {
+                orthogonal_bias = rect1.width / 2.0;
+            }
+            
+            let b_value = (p1 + orthogonal_bias) * K_ORTHOGONAL_WEIGHT_FOR_UP_DOWN;
+            let c_value = ALIGN_WEIGHT * align_bias;
+            (b_value, c_value)
+        }
+    };
+    
+    // Return the final distance calculation
+    a + b - c - d
+}
+
+#[wasm_bindgen]
+#[derive(Clone, Copy)]
+pub struct IntersectionRect {
+    pub width: f64,
+    pub height: f64,
+    pub area: f64,
+}
+
+#[wasm_bindgen]
+impl IntersectionRect {
+    #[wasm_bindgen(constructor)]
+    pub fn new(width: f64, height: f64, area: f64) -> IntersectionRect {
+        IntersectionRect { width, height, area }
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_intersection_rect(rect1: &Rect, rect2: &Rect) -> IntersectionRect {
+    let new_left = f64::max(rect1.left, rect2.left);
+    let new_top = f64::max(rect1.top, rect2.top);
+    let new_right = f64::min(rect1.right, rect2.right);
+    let new_bottom = f64::min(rect1.bottom, rect2.bottom);
+    
+    let width = f64::max(0.0, new_right - new_left);
+    let height = f64::max(0.0, new_bottom - new_top);
+    
+    let area = if width > 0.0 && height > 0.0 {
+        (width * height).sqrt()
+    } else {
+        0.0
+    };
+    
+    IntersectionRect { width, height, area }
+}
+
+// Add these new functions after the existing ones
+
+#[wasm_bindgen]
+pub fn get_closest_element(
+    current_element_rect: &Rect,
+    candidate_rects: Vec<Rect>,
+    dir: Direction,
+    distance_function_name: &str
+) -> Option<usize> {
+    if candidate_rects.is_empty() {
+        return None;
+    }
+
+    let event_target_rect = current_element_rect.clone();
+    let mut min_distance = f64::INFINITY;
+    let mut min_distance_indices = Vec::new();
+
+    // Choose the appropriate distance function
+    let distance_function = match distance_function_name {
+        "getAbsoluteDistance" => get_absolute_distance,
+        "getEuclideanDistance" => get_euclidean_distance,
+        "getDistance" => get_distance,
+        "getDistanceFromPoint" => |r1: &Rect, r2: &Rect, d: Direction| {
+            // Get the starting point from global variable
+            let starting_point = {
+                let sp = STARTING_POINT.lock().unwrap();
+                match *sp {
+                    Some(point) => point,
+                    None => Point { x: 0.0, y: 0.0 }
+                }
+            };
+            get_distance_from_point(&starting_point, r2, d)
+        },
+        "getInnerDistance" => |r1: &Rect, r2: &Rect, d: Direction| {
+            match d {
+                Direction::Left => r1.right - r2.right,
+                Direction::Right => r2.left - r1.left,
+                Direction::Up => r1.bottom - r2.bottom,
+                Direction::Down => r2.top - r1.top
+            }.abs()
+        },
+        _ => get_distance // Default to getDistance
+    };
+
+    // Find the closest candidate(s)
+    for (i, candidate_rect) in candidate_rects.iter().enumerate() {
+        let distance = distance_function(&event_target_rect, candidate_rect, dir);
+
+        if distance < min_distance {
+            min_distance = distance;
+            min_distance_indices.clear();
+            min_distance_indices.push(i);
+        } else if distance == min_distance {
+            min_distance_indices.push(i);
+        }
+    }
+
+    // If multiple candidates have the same minimum distance
+    if min_distance_indices.len() > 1 && distance_function_name == "getAbsoluteDistance" {
+        // Recursive call with getEuclideanDistance to break ties
+        let tied_candidates: Vec<Rect> = min_distance_indices
+            .iter()
+            .map(|&i| candidate_rects[i].clone())
+            .collect();
+        
+        if let Some(closest_index) = get_closest_element(
+            current_element_rect,
+            tied_candidates,
+            dir,
+            "getEuclideanDistance"
+        ) {
+            return Some(min_distance_indices[closest_index]);
+        }
+    }
+
+    // Return the first (or only) closest candidate
+    min_distance_indices.first().copied()
+}
+
+#[wasm_bindgen]
+pub fn select_best_candidate_from_edge(current_elm_rect: &Rect, candidate_rects: Vec<Rect>, dir: Direction) -> Option<usize> {
+    let starting_point_exists = {
+        let sp = STARTING_POINT.lock().unwrap();
+        sp.is_some()
+    };
+    
+    if starting_point_exists {
+        // If starting point exists, use getDistanceFromPoint
+        get_closest_element(current_elm_rect, candidate_rects, dir, "getDistanceFromPoint")
+    } else {
+        // Otherwise use getInnerDistance
+        get_closest_element(current_elm_rect, candidate_rects, dir, "getInnerDistance")
+    }
+}
+
+#[wasm_bindgen]
+pub fn select_best_candidate(
+    current_elm: &Rect,
+    candidates: Vec<Rect>,
+    dir: Direction,
+    spatial_navigation_function: &str
+) -> Option<usize> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let mut aligned_candidates = Vec::new();
+    
+    // Apply spatial navigation function logic
+    match spatial_navigation_function {
+        "grid" => {
+            // Filter candidates that are aligned with the current element
+            for (i, candidate) in candidates.iter().enumerate() {
+                if is_aligned(current_elm, candidate, dir) {
+                    aligned_candidates.push(i);
+                }
+            }
+            
+            // If we have aligned candidates, use them instead of all candidates
+            if !aligned_candidates.is_empty() {
+                let filtered_candidates: Vec<Rect> = aligned_candidates
+                    .iter()
+                    .map(|&i| candidates[i].clone())
+                    .collect();
+                
+                // Get closest element using absolute distance
+                if let Some(closest_index) = get_closest_element(
+                    current_elm,
+                    filtered_candidates,
+                    dir,
+                    "getAbsoluteDistance"
+                ) {
+                    return Some(aligned_candidates[closest_index]);
+                }
+            }
+            
+            // Fall back to absolute distance if no aligned candidates
+            get_closest_element(current_elm, candidates, dir, "getAbsoluteDistance")
+        },
+        _ => {
+            // Default case - use standard distance function
+            get_closest_element(current_elm, candidates, dir, "getDistance")
+        }
+    }
 }
 
 // Initialize function for panic hook
