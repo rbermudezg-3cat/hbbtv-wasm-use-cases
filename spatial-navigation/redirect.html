@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting...</title>
+    <script>
+        // Generate a cache buster query string using the current timestamp
+        const cacheBuster = new Date().getTime();
+        // Redirect to demo.html with the cache buster
+        //window.location.href = `demo.html?cache=${cacheBuster}`;
+        //window.location.href = `https://ccma-labs-generic.s3.eu-west-1.amazonaws.com/hbbtv_wasm_svg/demo.html?cache=${cacheBuster}`;
+        window.location.href = `https://ccma-labs-generic.s3.eu-west-1.amazonaws.com/lottie-comparison/lottie-web/index.html?cache=${cacheBuster}`;
+        //window.location.href = `https://ccma-labs-generic.s3.eu-west-1.amazonaws.com/lottie-comparison/wasm/index.html?cache=${cacheBuster}`;
+    </script>
+</head>
+
+<body>
+    <p>Redirecting to demo.html...</p>
+</body>
+
+</html>

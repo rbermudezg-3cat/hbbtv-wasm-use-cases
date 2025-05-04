@@ -10,13 +10,6 @@ extern "C" {
     #[wasm_bindgen()]
     fn startDebugTimer(s: &str);
     fn endDebugTimer(s: &str);
-
-    #[wasm_bindgen(js_namespace = spatialNavigation)]
-    isDelegableContainer
-    #[wasm_bindgen(js_namespace = spatialNavigation)]
-    isFocusable
-    #[wasm_bindgen(js_namespace = spatialNavigation)]
-    isVisible
 }
 
 // Direction enum
