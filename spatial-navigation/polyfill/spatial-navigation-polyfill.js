@@ -55,9 +55,15 @@
 
     switch (preference) {
       case 'js':
-        return jsImpl(...args);
+        window.startDebugTimer(fnName + ' js');
+        const jsResult = jsImpl(...args);
+        window.endDebugTimer(fnName + ' js');
+        return jsResult;
       case 'wasm':
-        return wasmImpl(...args);
+        window.startDebugTimer(fnName + ' wasm');
+        const wasmResult = wasmImpl(...args);
+        window.endDebugTimer(fnName + ' wasm');
+        return wasmResult;
       case 'compare':
       default:
         return measurePerformance(fnName, jsImpl, wasmImpl, args);
@@ -80,6 +86,16 @@
   }
 
   /**
+   * Get fnImplementation config for the specified function
+   * @function getImplementationPreference
+   * @param {string} fnName - Name of the function to get the implementation preference for
+   * @returns {string} - Implementation preference for the specified function
+   * */
+  function getImplementationPreference(fnName) {
+    return fnImplementationConfig[fnName] || 'compare';
+  }
+
+  /**
    * Measures performance of JS vs WASM implementation and compares results
    * @function measurePerformance
    * @param {string} fnName - Name of the function being measured
@@ -91,21 +107,14 @@
    */
   function measurePerformance(fnName, jsImpl, wasmImpl, args, compareResults = (a, b) => JSON.stringify(a) === JSON.stringify(b)) {
     // Measure JS performance
-    const jsStartTime = performance.now();
     window.startDebugTimer(fnName + ' js');
     const jsResult = jsImpl(...args);
     window.endDebugTimer(fnName + ' js');
-    const jsEndTime = performance.now();
-    const jsDuration = jsEndTime - jsStartTime;
-
+    
     // Measure WASM performance
-    const wasmStartTime = performance.now();
     window.startDebugTimer(fnName + ' wasm');
-    const wasmResult = wasmImpl(...args);
+    const _ = wasmImpl(...args);
     window.endDebugTimer(fnName + ' wasm');
-    const wasmEndTime = performance.now();
-    const wasmDuration = wasmEndTime - wasmStartTime;
-
     return jsResult;
   }
   
@@ -232,7 +241,6 @@
    */
   function navigate(dir) {
     // spatial navigation steps
-
     // 1
     const searchOrigin = findSearchOrigin();
     let eventTarget = searchOrigin;
@@ -276,7 +284,6 @@
       }
       container = eventTarget;
       let bestInsideCandidate = null;
-
       // 5-2
       if ((document.activeElement === searchOrigin) ||
         (document.activeElement === document.body) && (searchOrigin === document.documentElement)) {
@@ -382,7 +389,24 @@
    *                                          Default value is 'visible'.
    * @returns {sequence<Node>} candidate elements within the container
    */
+  // Create a WeakMap cache to store results by container
+  let spatialNavCandidatesCache = new WeakMap();
+
   function getSpatialNavigationCandidates(container, option = { mode: 'visible' }) {
+    // Generate a cache key that includes the option mode
+    const cacheKey = option.mode || 'visible';
+    
+    // Check if we have a cache for this container
+    let containerCache = spatialNavCandidatesCache.get(container);
+    if (!containerCache) {
+      // Initialize cache for this container if it doesn't exist
+      containerCache = new Map();
+      spatialNavCandidatesCache.set(container, containerCache);
+    } else if (containerCache.has(cacheKey)) {
+      // Return cached result if available
+      return containerCache.get(cacheKey);
+    }
+    
     let candidates = [];
 
     if (container.childElementCount > 0) {
@@ -395,7 +419,7 @@
           candidates.push(elem);
         } else if (isFocusable(elem)) {
           candidates.push(elem);
-
+          
           if (!isContainer(elem) && elem.childElementCount) {
             candidates = candidates.concat(getSpatialNavigationCandidates(elem, { mode: 'all' }));
           }
@@ -404,8 +428,28 @@
         }
       }
     }
-    return (option.mode === 'all') ? candidates : candidates.filter(isVisible);
+
+    // Filter by visibility if needed
+    const result = (option.mode === 'all') ? candidates : candidates.filter(isVisible);
+    
+    // Store result in cache
+    containerCache.set(cacheKey, result);
+    
+    return result;
   }
+
+  // Add this after the function definition
+  const spatialNavObserver = new MutationObserver(() => {
+    spatialNavCandidatesCache = new WeakMap();
+  });
+
+  // Start observing the document
+  spatialNavObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['tabindex', 'disabled', 'hidden', 'style', 'class']
+  });
 
   /**
    * Find the candidates among focusable elements within a spatial navigation container from the search origin (currently focused element)
@@ -449,14 +493,13 @@
     // Set default parameter value
     if (!args)
       args = {};
+    console.time('spatialNavigationSearch');
     const defaultContainer = targetElement.getSpatialNavigationContainer();
     let defaultCandidates = getSpatialNavigationCandidates(defaultContainer);
     const container = args.container || defaultContainer;
-    console.time('spatialNavigationSearch');
     if (args.container && (defaultContainer.contains(args.container))) {
       defaultCandidates = defaultCandidates.concat(getSpatialNavigationCandidates(container));
     }
-    console.timeEnd('spatialNavigationSearch');
     const candidates = (args.candidates && args.candidates.length > 0) ?
       args.candidates.filter((candidate) => container.contains(candidate)) :
       defaultCandidates.filter((candidate) => container.contains(candidate) && (container !== candidate));
@@ -510,9 +553,10 @@
           bestTarget = candidates.length ? targetElement.spatialNavigationSearch(dir, { candidates: candidates, container: container }) : null;
         }
       }
+      console.timeEnd('spatialNavigationSearch');
       return bestTarget;
     }
-
+    console.timeEnd('spatialNavigationSearch');
     return null;
   }
 
@@ -862,7 +906,7 @@
    * @param option - visible || all
    * @param dir {SpatialNavigationDirection} - The directional information for the spatial navigation (e.g. LRUD)
    */
-  function navigateChain(eventTarget, container, parentContainer, dir, option) {
+   function navigateChain(eventTarget, container, parentContainer, dir, option) {
     let currentOption = { candidates: getSpatialNavigationCandidates(container, { mode: option }), container };
 
     while (parentContainer) {
@@ -2055,9 +2099,16 @@
   initiateSpatialNavigation();
   enableExperimentalAPIs(false);
 
+  window.spatialNavigation = window.spatialNavigation || {
+      isDelegableContainer,
+      isFocusable,
+      isVisible
+  }
+
   window.addEventListener('load', () => {
     spatialNavigationHandler();
     // Report metrics after 5 seconds to allow for some navigation
     window.setImplementationPreference = setImplementationPreference;
-  });
+    window.getImplementationPreference = getImplementationPreference;
+   });
 })();

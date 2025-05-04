@@ -186,6 +186,12 @@ const runWasm = async () => {
       const wasmCurrentElement = createWasmRect(currentElmRect);
       const wasmCandidates = candidateRects.map(candidate => createWasmRect(candidate));
       return wasm.select_best_candidate(wasmCurrentElement, wasmCandidates, Direction[dir], spatialNavigationFunction);
+    },
+    isAtagWithoutHref(tagName, hrefAttr, tabIndexAttr) {
+      return wasm.is_a_tag_without_href(tagName, hrefAttr, tabIndexAttr);
+    },
+    readCssVar(elementStyle, varName) {
+      return wasm.read_css_var(elementStyle, varName);
     }
   };
 };

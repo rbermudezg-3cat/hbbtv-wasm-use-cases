@@ -10,6 +10,13 @@ extern "C" {
     #[wasm_bindgen()]
     fn startDebugTimer(s: &str);
     fn endDebugTimer(s: &str);
+
+    #[wasm_bindgen(js_namespace = spatialNavigation)]
+    isDelegableContainer
+    #[wasm_bindgen(js_namespace = spatialNavigation)]
+    isFocusable
+    #[wasm_bindgen(js_namespace = spatialNavigation)]
+    isVisible
 }
 
 // Direction enum
@@ -621,4 +628,28 @@ pub fn select_best_candidate(
 pub fn init() {
     #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
+}
+
+// Add this to lib.rs
+#[wasm_bindgen]
+pub fn is_a_tag_without_href(tag_name: &str, href_attr: Option<String>, tab_index_attr: Option<String>) -> bool {
+    tag_name == "A" && href_attr.is_none() && tab_index_attr.is_none()
+}
+
+// Add this after other public functions
+
+#[wasm_bindgen]
+pub fn read_css_var(element_style: &str, var_name: &str) -> String {
+    let property_name = format!("--{}", var_name);
+    let property_pattern = format!("{}\\s*:\\s*([^;]+)", regex::escape(&property_name));
+    
+    if let Ok(re) = regex::Regex::new(&property_pattern) {
+        if let Some(captures) = re.captures(element_style) {
+            if let Some(value) = captures.get(1) {
+                return value.as_str().trim().to_string();
+            }
+        }
+    }
+    
+    String::new() // Return empty string if property not found
 }

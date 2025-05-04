@@ -107,17 +107,17 @@
     function clearList(technology) {
       document.getElementsByClassName("list-container")[0].innerHTML = '';
       return new Promise((resolve) => {
-        setTimeout(() => {
+        //setTimeout(() => {
           resolve();
-        }, 0);
+        //}, 0);
       });
     }
     function insertElements(elements) {
       return new Promise((resolve) => {
-        setTimeout(() => {
+        //setTimeout(() => {
           document.getElementsByClassName("list-container")[0].innerHTML = elements;
           resolve();
-        }, 0);
+        //}, 0);
       });
     }
     // Cache for string buffer and animation control
@@ -126,7 +126,6 @@
     let animationFrameId = null;
 
     function renderElements(totalElements) {
-
       clearList().then(() => {
         let items = '';
 
@@ -199,7 +198,7 @@
       }
       document.addEventListener('keydown', handleKeydown);
       document.getElementsByClassName("item").item(0).focus(); // Focus the first item
-      renderElements(500);
+      renderElements(5000);
     }
   </script>
   <object id="oipfAppMan" type="application/oipfApplicationManager"
@@ -229,39 +228,6 @@
     const maxLogEntries = 5;
     const durations = [];
 
-    // Override the logging function
-    function logDuration(startTime, functionName) {
-      const endTime = performance.now();
-      const duration = parseFloat((endTime - startTime).toFixed(2));
-      const logDiv = document.getElementById("log");
-
-      // Add to durations array for average calculation
-      durations.push(duration);
-      if (durations.length > 20) durations.shift(); // Keep last 20 values for average
-
-      // Create log entry
-      const logEntry = `${functionName}: ${duration} ms`;
-
-      // Update log display
-      if (logDiv) {
-        // Only keep the latest entries
-        const entries = logDiv.innerHTML.split('<br>').filter(entry => entry.trim() !== '');
-
-        // Add new entry at the beginning
-        entries.unshift(logEntry);
-
-        // Keep only the latest entries
-        while (entries.length > maxLogEntries) {
-          entries.pop();
-        }
-
-        logDiv.innerHTML = entries.join('<br>');
-
-        // Update average
-        const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
-        document.getElementById("average").textContent = avg.toFixed(2);
-      }
-    }
 
     const log = document.querySelector("#log");
     window.debugTimers = {};
@@ -296,9 +262,16 @@
       if (window.debugTimersHistory['selectBestCandidate js'] || window.debugTimersHistory['selectBestCandidate wasm']) {
         const jsDuration = calculateMedian(window.debugTimersHistory['selectBestCandidate js'] || [])
         const wasmDuration = calculateMedian(window.debugTimersHistory['selectBestCandidate wasm'] || [])
-        log.innerHTML = 'JS: ' + jsDuration.toFixed(2) + ' ms<br>' +
-          'Wasm: ' + wasmDuration.toFixed(2) + ' ms<br>' +
-          'Ratio: ' + (jsDuration / wasmDuration).toFixed(2) + 'x';
+        const navigationType = getImplementationPreference('selectBestCandidate');
+        if(navigationType === 'wasm') {
+          log.innerHTML = 'Wasm: ' + wasmDuration.toFixed(2) + ' ms';
+        } else if (navigationType === 'js') {
+          log.innerHTML = 'JS: ' + jsDuration.toFixed(2) + ' ms';
+        } else {
+          log.innerHTML = 'JS: ' + jsDuration.toFixed(2) + ' ms<br>' +
+            'Wasm: ' + wasmDuration.toFixed(2) + ' ms<br>' +
+            'Ratio: ' + (jsDuration / wasmDuration).toFixed(2) + 'x';
+        }
       }
     }, 2000);
 
